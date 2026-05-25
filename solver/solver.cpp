@@ -17,10 +17,31 @@ float K_ij(glm::vec2 p0, glm::vec2 p1, glm::vec2 p2, int i, int j) {
     return glm::dot(grads[i], grads[j]) / (4 * triangle_area(p0,p1,p2));
 }
 
-//very basic integral approximation
-float F_i(glm::vec2 p1, glm::vec2 p2, glm::vec2 p3, float (*function)(float, float)) {
-    const glm::vec2 barycenter = (p1 + p2 + p3) / 3.0f;
-    return (function(barycenter.x, barycenter.y) / 3) * triangle_area(p1, p2, p3);
+//edge-midpoint approximation
+float F_i(glm::vec2 p1, glm::vec2 p2, glm::vec2 p3, float (*function)(float, float), int i) {
+    const glm::vec2 e12 = (p1 + p2) * 0.5f;
+    const glm::vec2 e13 = (p1 + p3) * 0.5f;
+    const glm::vec2 e23 = (p2 + p3) * 0.5f;
+    glm::vec3 w;
+    switch(i) {
+        case 0:
+            w = {0.5f, 0.5f, 0.0f};
+            break;
+        case 1:
+            w = {0.5f, 0.0f, 0.5f};
+            break;
+        case 2:
+            w = {0.0f, 0.5f, 0.5f};
+            break;
+        default:
+            printf("Got %d insted of 0,1 or 2 as local coordinate!\n", i);
+            assert(false);
+    }
+
+    const float total = function(e12.x, e12.y) * w.x
+        + function(e13.x, e13.y) * w.y
+        + function(e23.x, e23.y) * w.z;
+    return (total / 3) * triangle_area(p1, p2, p3);
 }
 
 SquareMatrix::SquareMatrix() : rows(){
@@ -77,7 +98,7 @@ std::pair<SquareMatrix, std::vector<float>> Solver::assemble(const FemMesh &mesh
                 case neumann:
                     node_I = el.nodes[i];
 
-                    global_F[node_I] += F_i(n0.position, n1.position, n2.position, function);
+                    global_F[node_I] += F_i(n0.position, n1.position, n2.position, function, i);
 
                     for(int j = 0; j < 3; j++) {
                         unsigned int node_J = el.nodes[j];
@@ -178,69 +199,6 @@ std::vector<float> CG(const SquareMatrix &M, std::vector<float> &F) {
         }
     }
     return x;
-}
-
-//for square matrices
-std::vector<float> gaussianElimination(std::vector<float> &M, std::vector<float> &F, int sideLen) {
-//  std::vector<int> pivot(sideLen);
-
-//  for(int i = 0; i < sideLen; i++) {
-//      pivot[i] = i;
-//  }
-
-    for(int i = 0; i < sideLen; i++) {
-        int maxInd = i;
-        float max = M[sideLen*i + i];
-
-        //find max for elimination
-        for(int j = i + 1; j < sideLen; j++) {
-            if(glm::abs(M[sideLen*j + i]) > glm::abs(max)) {
-                max = M[sideLen*j + i];
-                maxInd = j;
-            }
-        }
-
-        //set pivot and swap the solution vector
-//      int itmp = pivot[maxInd];
-//      pivot[i] = itmp;
-//      pivot[maxInd] = pivot[i];
-
-        float ftmp = F[maxInd];
-        F[maxInd] = F[i];
-        F[i] = ftmp;
-        
-        //swap the rows
-        for(int j = i; j < sideLen; j++) {
-            ftmp = M[sideLen * i + j];
-            M[sideLen * i + j] = M[sideLen*maxInd + j];
-            M[sideLen*maxInd + j] = ftmp;
-        }
-
-        //gussian elimination
-        for(int j = i + 1; j < sideLen; j++) {
-            float delta = -M[sideLen*j + i] / M[sideLen*i + i];
-            M[sideLen*j + i] = 0;
-            F[j] += F[i] * delta;
-
-            for(int k = i + 1; k < sideLen; k++) {
-                M[sideLen*j + k] += delta * M[sideLen*i + k];
-            }
-        }
-    }
-
-    //solve the triangular matrix
-    std::vector<float> sol(sideLen);
-
-    sol[sideLen - 1] = F[sideLen - 1] / M[sideLen*sideLen - 1]; 
-    for(int i = sideLen - 2; i >= 0; i--) {
-        sol[i] = F[i];
-        for(int j = sideLen - 1; j > i; j--) {
-            sol[i] -= sol[j] * M[sideLen*i + j];
-        }
-        sol[i] /= M[sideLen*i + i];
-    }
-
-    return sol;
 }
 
 void printSquareMat(const SquareMatrix &M) {

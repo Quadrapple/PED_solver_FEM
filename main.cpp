@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
@@ -95,7 +96,8 @@ std::unique_ptr<FemMesh> demoTriangleMesh(int size, float (*u)(float, float)) {
         nodes.push_back(v);
 
         for(float y = -range + delta; y <= range - delta + eps; y += delta) {
-            Node v = {{x, y}, active};
+            glm::vec2 deviation = 0.49f*delta * glm::vec2((float)((double) rand() / (double) RAND_MAX));
+            Node v = {glm::vec2{x, y} + deviation, active};
             nodes.push_back(v);
         }
 
@@ -131,7 +133,13 @@ std::unique_ptr<FemMesh> demoTriangleMesh(int size, float (*u)(float, float)) {
     return std::move(res);
 }
 
-VertexArray demoTriangleMeshGr(const std::unique_ptr<FemMesh> &femmesh, int size, std::vector<float> colors) {
+glm::vec3 interpolate3(float val, glm::vec3 first, glm::vec3 second, glm::vec3 third) {
+    return glm::max(1.0f - glm::abs(val), 0.0f) * second
+                + glm::max(1.0f - glm::abs(val + 1.0f), 0.0f) * first
+                + glm::max(1.0f - glm::abs(val - 1.0f), 0.0f) * third;
+}
+
+VertexArray demoTriangleMeshGr(const std::unique_ptr<FemMesh> &femmesh, int size, const std::vector<float> &colors) {
     std::vector<mVertex> mVertices;
     std::vector<unsigned int> mIndices;
 
@@ -148,13 +156,16 @@ VertexArray demoTriangleMeshGr(const std::unique_ptr<FemMesh> &femmesh, int size
         }
     }
 
+    glm::vec3 lowColor = {0.05, 0.05, 0.05};
+    glm::vec3 midColor = {0.2, 0.2, 0.5};
+    glm::vec3 highColor = {1.0, 0.3, 0.0};
+
     for(int i = 0; i < doublesize; i++) {
         for(int j = 0; j < doublesize; j++) {
             float colorVal = glm::atan(femmesh->nodes[doublesize * i + j].value / max);
-            float greenColorVal =(
-                    (glm::abs(max) - glm::abs(femmesh->nodes[doublesize * i + j].value)*4) / glm::abs(max));
+            glm::vec3 color = glm::pow(interpolate3(colorVal, lowColor, midColor, highColor), glm::vec3(1.25f));
 
-            mVertex v = {femmesh->nodes[doublesize * i + j].position, {colorVal, greenColorVal, -colorVal}};
+            mVertex v = {femmesh->nodes[doublesize * i + j].position, color};
             mVertices.push_back(v);
         }
     }
@@ -186,11 +197,11 @@ float u(float x, float y) {
 
 int main(int argc, char* argv[]) {
 
-    ctx = new EventHandler("Test", glm::vec2(800, 600));
+    ctx = new EventHandler("Test", glm::vec2(1200, 900));
     ctx->disableMouse();
     ctx->disable(GL_DEPTH_TEST);
 
-    const int size = 100;
+    const int size = 10;
     auto fTriangles = demoTriangleMesh(size, u);
     Solver solver;
 
