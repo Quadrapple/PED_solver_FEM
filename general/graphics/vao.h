@@ -43,6 +43,8 @@ class VertexArray {
         void addAttrib(const VertexAttrib &attrib);
 
         unsigned int indexCount;
+        unsigned int vertexCount;
+
         VertexArray& operator<<(const VertexAttrib &attrib);
     private:
         unsigned int attribCount;

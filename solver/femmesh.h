@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <memory>
 #include <vector>
 
 enum NodeType {
@@ -35,14 +36,14 @@ struct FiniteElement {
 class FemMesh {
     public:
         FemMesh();
-        FemMesh(std::vector<Node> nodes, std::vector<unsigned int> elementIndices);
+        FemMesh(std::shared_ptr<std::vector<Node>> nodes, std::vector<unsigned int> elementIndices);
 
         Node nodeOfElement(int elIndex, int localNodeIndex) const;
         unsigned int indexOfNodeOfElement(int elIndex, int localNodeIndex) const;
         void setupFE(std::vector<unsigned int> indices);
         std::vector<unsigned int> activeNodes;
         std::vector<unsigned int> passiveNodes;
-        std::vector<Node> nodes;
+        std::shared_ptr<std::vector<Node>> nodes;
 
         std::vector<unsigned int> nodeIndexMap;
         std::vector<FiniteElement> elems;

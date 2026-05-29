@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdlib>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -8,6 +9,7 @@
 #include <glm/geometric.hpp>
 #include <glm/trigonometric.hpp>
 #include <iostream>
+#include <list>
 #include <stdio.h>
 
 #include <glm/glm.hpp>
@@ -17,6 +19,8 @@
 #include "buffer.h"
 #include "general/event_handler.h"
 #include "femmesh.h"
+#include "quadedge.h"
+#include "quadtree.h"
 #include "solver.h"
 #include "shader.h"
 #include "vao.h"
@@ -73,65 +77,71 @@ struct mVertex {
     glm::vec3 color;
 };
 
-std::unique_ptr<FemMesh> demoTriangleMesh(int size, float (*u)(float, float)) {
-    std::vector<Node> nodes;
-    std::vector<unsigned int> mIndices;
+struct Adjacency {
+    std::vector<std::pair<unsigned int, std::list<unsigned int>>> arr; // adjacencies
 
-    const float range = 0.8f; 
-
-    float delta = range / (float)size;
-
-    float eps = (1 + (float)size/15)*glm::epsilon<float>();
-
-    //left boundary
-    for(float y = -range; y <= range + eps; y += delta) {
-        Node v = {{-range, y}, dirichlet, u(-range, y)};
-        nodes.push_back(v);
+    Adjacency(int num) : arr(num) {
+        for(int i = 0; i < num; i++) {
+            arr.emplace_back();
+        }
     }
 
+    void connect(unsigned int a_local, unsigned int b_local) {
+        arr[a_local].second.push_back(b_local);
+        arr[b_local].second.push_back(a_local);
+    }
+};
 
-    for(float x = -range + delta; x <= range - delta + eps; x += delta) {
+std::shared_ptr<std::vector<Node>> demoTriangleMesh(int size, float (*u)(float, float)) {
+    auto nodes = std::make_shared<std::vector<Node>>();
+    
+    const float range = 0.8f; 
+    float delta = range / (float)size;
+
+    std::vector<std::list<unsigned int>> adj; // adjacencies
+
+    //BOUNDARIES===============================================
+    //left boundary
+    for(int y = -size; y <= size; y++) {
+        Node v = {{-range, y * delta}, dirichlet, u(-range, y*delta)};
+        nodes->push_back(v);
+    }
+
+    for(int x = -size + 1; x <= size - 1; x++) {
         //top boundary
-        Node v = {{x, -range}, dirichlet, u(x, -range)};
-        nodes.push_back(v);
-
-        for(float y = -range + delta; y <= range - delta + eps; y += delta) {
-            glm::vec2 deviation = 0.49f*delta * glm::vec2((float)((double) rand() / (double) RAND_MAX));
-            Node v = {glm::vec2{x, y} + deviation, active};
-            nodes.push_back(v);
-        }
+        Node v = {{x*delta, -range}, dirichlet, u(x*delta, -range)};
+        nodes->push_back(v);
 
         //bottom boundary
-        v = {{x, range}, dirichlet, u(x, range)};
-        nodes.push_back(v);
+        v = {{x*delta, range}, dirichlet, u(x*delta, range)};
+        nodes->push_back(v);
     }
 
     //right boundary
-    for(float y = -range; y <= range + eps; y += delta) {
-        Node v = {{range, y}, dirichlet, u(range, y)};
-        nodes.push_back(v);
+    for(int y = -size; y <= size; y++) {
+        Node v = {{range, y*delta}, dirichlet, u(range, y*delta)};
+        nodes->push_back(v);
     }
+    //=========================================================
 
-    int doublesize = 2*size + 1;
-    printf("Nodesize  = %zu, dsize = %d, dsize^2 = %d\n", nodes.size(), doublesize, doublesize*doublesize -1 );
-    for(int i = 0; i < doublesize - 1; i++) {
-        for(int j = 0; j < doublesize - 1; j++) {
-            // 90 deg top left
-            mIndices.push_back(doublesize * i + j);
-            mIndices.push_back(doublesize * (i + 1) + j);
-            mIndices.push_back(doublesize * i + (j + 1));
-
-            //90 deg bottom right
-            mIndices.push_back(doublesize * i + (j + 1));
-            mIndices.push_back(doublesize * (i + 1) + j);
-            mIndices.push_back(doublesize * (i + 1) + (j + 1));
+    //INTERNAL=================================================
+    for(int x = -size + 1; x <= size - 1; x++) {
+        for(int y = -size + 1; y <= size - 1; y++) {
+            Node v = {{x*delta, y*delta}, active, 0.0f};
+            nodes->push_back(v);
         }
     }
-    auto res = std::make_unique<FemMesh>(nodes, mIndices);
+    //=========================================================
 
-    printf("made mesh\n");
-    return std::move(res);
+    printf("generated nodes\n");
+    return std::move(nodes);
 }
+
+
+std::unique_ptr<FemMesh> genFEM(std::shared_ptr<std::vector<Node>> nodes, float (*u)(float, float)) {
+    return nullptr;
+}
+
 
 glm::vec3 interpolate3(float val, glm::vec3 first, glm::vec3 second, glm::vec3 third) {
     return glm::max(1.0f - glm::abs(val), 0.0f) * second
@@ -139,6 +149,37 @@ glm::vec3 interpolate3(float val, glm::vec3 first, glm::vec3 second, glm::vec3 t
                 + glm::max(1.0f - glm::abs(val - 1.0f), 0.0f) * third;
 }
 
+VertexArray visTriangulation(const std::unique_ptr<QuadEdge> &qu) {
+    std::vector<mVertex> mVertices;
+    std::vector<unsigned int> mIndices;
+
+    const float range = 0.8f; 
+
+//  glm::vec3 colors[] = {{1.0, 0.1, 0.1}, {0.1, 1.0, 0.1}, {0.1, 0.1, 1.0}, 
+//                          {0.5, 0.0, 0.0}, {0.0, 0.5, 0.0}, {0.0, 0.0, 0.5}};
+
+    for(auto edgerecord : qu->edgeRecords) {
+        if(edgerecord->edges[0].orig() <= -1) {
+            continue;
+        }
+        glm::vec2 org = qu->origOf(&edgerecord->edges[0]).position;
+        glm::vec2 dst = qu->destOf(&edgerecord->edges[0]).position;
+
+        mVertices.push_back({org, {1.0, 1.0, 1.0}});
+        mVertices.push_back({dst, {1.0, 1.0, 1.0}});
+    }
+
+    VertexArray triangleMesh;
+    triangleMesh.bind();
+    triangleMesh.setVertices(std::make_unique<Buffer>(GL_ARRAY_BUFFER, mVertices.size() * sizeof(mVertex), mVertices.data()));
+
+    triangleMesh.vertexCount = mVertices.size();
+    triangleMesh.addAttrib(VertexAttrib{2, sizeof(mVertex), GL_FLOAT, (void*)offsetof(mVertex, pos)});
+    triangleMesh.addAttrib(VertexAttrib{3, sizeof(mVertex), GL_FLOAT, (void*)offsetof(mVertex, color)});
+    return triangleMesh;
+}
+
+/*
 VertexArray demoTriangleMeshGr(const std::unique_ptr<FemMesh> &femmesh, int size, const std::vector<float> &colors) {
     std::vector<mVertex> mVertices;
     std::vector<unsigned int> mIndices;
@@ -148,6 +189,7 @@ VertexArray demoTriangleMeshGr(const std::unique_ptr<FemMesh> &femmesh, int size
 //  glm::vec3 colors[] = {{1.0, 0.1, 0.1}, {0.1, 1.0, 0.1}, {0.1, 0.1, 1.0}, 
 //                          {0.5, 0.0, 0.0}, {0.0, 0.5, 0.0}, {0.0, 0.0, 0.5}};
     int doublesize = 2*size + 1;
+
 
     float max = 0;
     for(auto node: femmesh->nodes) {
@@ -186,6 +228,7 @@ VertexArray demoTriangleMeshGr(const std::unique_ptr<FemMesh> &femmesh, int size
     triangleMesh.addAttrib(VertexAttrib{3, sizeof(mVertex), GL_FLOAT, (void*)offsetof(mVertex, color)});
     return triangleMesh;
 }
+*/
 
 float f(float x, float y) {
     return x*40;
@@ -201,7 +244,31 @@ int main(int argc, char* argv[]) {
     ctx->disableMouse();
     ctx->disable(GL_DEPTH_TEST);
 
-    const int size = 10;
+    const int size = 2;
+
+    auto nodes = demoTriangleMesh(size, u);
+
+    auto qedge = std::make_unique<QuadEdge>(nodes);
+    printf("created quadedge\n");
+    auto qtree = std::make_unique<Quadtree>();
+    qtree->putall(nodes);
+
+    std::vector<unsigned int> ind;
+    ind.reserve(nodes->size());
+
+    for(int i = 0; i < nodes->size(); i++) {
+        ind.push_back(i);
+    }
+
+    std::sort(ind.begin(), ind.end(), 
+                [&qtree] (const unsigned int &a, const unsigned int &b) { return qtree->compareY(a,b); } );
+    std::stable_sort(ind.begin(), ind.end(), 
+                [&qtree] (const unsigned int &a, const unsigned int &b) { return qtree->compareX(a,b); } );
+
+    qedge->delaunay(ind.data(), ind.size());
+    printf("triangulated\n");
+
+    /*
     auto fTriangles = demoTriangleMesh(size, u);
     Solver solver;
 
@@ -216,6 +283,9 @@ int main(int argc, char* argv[]) {
     printf("assigned colors\n");
 
     VertexArray triangle = demoTriangleMeshGr(fTriangles, size, colors);
+    */
+
+    VertexArray triangle = visTriangulation(qedge);
 
     printf("created triangle\n");
     glfwSwapInterval(1);
@@ -234,16 +304,18 @@ int main(int argc, char* argv[]) {
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        color.use();
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-        glDrawElements(GL_TRIANGLES, triangle.indexCount, GL_UNSIGNED_INT, 0);
+//      color.use();
+//      glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+//      glDrawElements(GL_TRIANGLES, triangle.indexCount, GL_UNSIGNED_INT, 0);
 
-//      whiteLines.use();
-//      glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        whiteLines.use();
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        glDrawArrays(GL_LINES, 0, triangle.vertexCount);
 //      glDrawElements(GL_TRIANGLES, triangle.indexCount, GL_UNSIGNED_INT, 0);
 
         //Draw points
-//      point.use();
+        point.use();
+        glDrawArrays(GL_POINTS, 0, triangle.vertexCount);
 //      glDrawElements(GL_POINTS, triangle.indexCount, GL_UNSIGNED_INT, 0);
 
         ctx->bindVertexArray(0);

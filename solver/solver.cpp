@@ -1,3 +1,5 @@
+#pragma once
+
 #include "solver.h"
 #include "femmesh.h"
 #include <algorithm>
@@ -104,7 +106,7 @@ std::pair<SquareMatrix, std::vector<float>> Solver::assemble(const FemMesh &mesh
                         unsigned int node_J = el.nodes[j];
 
                         if(el.ntype[j] == dirichlet) {
-                            global_F[node_I] -= mesh.nodes[mesh.passiveNodes[node_J]].value * K_ij(n0.position, n1.position, n2.position, i, j);
+                            global_F[node_I] -= mesh.nodes->at(mesh.passiveNodes[node_J]).value * K_ij(n0.position, n1.position, n2.position, i, j);
                         } else {
                             global_K.put(node_I, node_J, K_ij(n0.position, n1.position, n2.position, i, j));
 //                          //global_K[sideLen*node_I + node_J] += K_ij(n0.position, n1.position, n2.position, i, j); 

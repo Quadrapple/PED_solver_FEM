@@ -10,11 +10,11 @@ void FemMesh::setupFE(std::vector<unsigned int> elementIndices) {
     }
 }
 
-FemMesh::FemMesh(std::vector<Node> nodes, std::vector<unsigned int> elementIndices) :
+FemMesh::FemMesh(std::shared_ptr<std::vector<Node>> nodes, std::vector<unsigned int> elementIndices) :
     activeNodes(), passiveNodes(), nodeIndexMap() 
 {
-    for(unsigned int i = 0; i < nodes.size(); i++) {
-        switch(nodes[i].type) {
+    for(unsigned int i = 0; i < nodes->size(); i++) {
+        switch(nodes->at(i).type) {
             case neumann:
             case active:
                 nodeIndexMap.push_back(activeNodes.size());
@@ -25,16 +25,16 @@ FemMesh::FemMesh(std::vector<Node> nodes, std::vector<unsigned int> elementIndic
                 passiveNodes.push_back(i);
                 break;
         }
-        this->nodes.push_back(nodes[i]);
+        this->nodes->push_back(nodes->at(i));
     }
 
     for(int i = 0; i < elementIndices.size(); i+=3) {
         glm::uvec3 indices = {nodeIndexMap[elementIndices[i]], nodeIndexMap[elementIndices[i+1]], nodeIndexMap[elementIndices[i+2]]};
         elems.push_back({indices,
-                {nodes[elementIndices[i]].type, nodes[elementIndices[i+1]].type, nodes[elementIndices[i+2]].type}});
+                {nodes->at(elementIndices[i]).type, nodes->at(elementIndices[i+1]).type, nodes->at(elementIndices[i+2]).type}});
     }
 
-    printf("activeNodes size %zu, passiveNodes size %zu, nodes size %zu\n", activeNodes.size(), passiveNodes.size(), this->nodes.size());
+    printf("activeNodes size %zu, passiveNodes size %zu, nodes size %zu\n", activeNodes.size(), passiveNodes.size(), this->nodes->size());
 }
 
 Node FemMesh::nodeOfElement(int elIndex, int localNodeIndex) const {
@@ -42,10 +42,10 @@ Node FemMesh::nodeOfElement(int elIndex, int localNodeIndex) const {
     switch(el.ntype[localNodeIndex]) {
         case neumann:
         case active:
-            return nodes[activeNodes[el.nodes[localNodeIndex]]];
+            return nodes->at(activeNodes[el.nodes[localNodeIndex]]);
             break;
         case dirichlet:
-            return nodes[passiveNodes[el.nodes[localNodeIndex]]];
+            return nodes->at(passiveNodes[el.nodes[localNodeIndex]]);
             break;
     }
     printf("Somehow reached end of nodeOfElement ;( \n");
